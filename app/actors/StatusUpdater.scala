@@ -21,7 +21,7 @@ class StatusUpdater(stationStatusActor: ActorRef, out: ActorRef) extends Actor w
 
 
   implicit val executionContext = context.dispatcher
-  val tick = context.system.scheduler.schedule(500 millis, 60 seconds, self, Tick)
+  val tick = context.system.scheduler.schedule(500 millis, 6 seconds, self, Tick)
 
 
   override def preStart(): Unit = {
@@ -87,7 +87,9 @@ class StatusUpdater(stationStatusActor: ActorRef, out: ActorRef) extends Actor w
         stationPassengers.take(metroCar.capacity - currentMetroPassengers.size)
       else List.empty
 
-      passengersThatBoarded = passengersThatBoarded.updated(metroCar.departureStation, passengersTaken.size)
+      val previousPassengers = passengersThatBoarded.getOrElse(metroCar.departureStation, 0)
+      passengersThatBoarded = passengersThatBoarded
+        .updated(metroCar.departureStation, previousPassengers+passengersTaken.size)
 
       (metroCarId, currentMetroPassengers ::: passengersTaken)
     }
@@ -116,7 +118,7 @@ class StatusUpdater(stationStatusActor: ActorRef, out: ActorRef) extends Actor w
     }
 
     Json.obj(
-      "metroCarsLocations" -> Json.toJson(metroCarLocations),
+      "metroCars" -> Json.toJson(metroCarLocations),
       "metroCarsCapacities" -> Json.toJson(metroCarCapacities),
       "stationCapacities" -> Json.toJson(stationCapacities)
     )

@@ -1,7 +1,87 @@
-@(message: String)
+@(stations: List[String] = List(
+    "Portal americas",
+    "Calle 42 sur",
+    "Carrera 80",
+    "Kennedy",
+    "Avenida Boyaca",
+    "Carrera 68",
+    "Carrera 50",
+    "NQS",
+    "Narino",
+    "Calle 1",
+    "Calle 10",
+    "Calle 26",
+    "Calle 45",
+    "Calle 63",
+    "Calle 72"
+))(implicit request: RequestHeader)
 
-@main("Welcome to Play") {
+@main() {
 
-    @play20.welcome(message)
+    <div id="metro-cars-table">
+        <table>
+            <tr>
+                <th>Metro Car ID</th>
+                <th>Departure Station</th>
+                <th>Minutes since departure</th>
+                <th>Current capacity</th>
+                <th>Total capacity</th>
+            </tr>
+            @for(i <- 1 to 23) {
+                <tr>
+                    <td>@i</td>
+                    <td id="@i-departure-station"> @i station</td>
+                    <td id="@i-time-since-departure"> @i minutes</td>
+                    <td id="@i-current-capacity"> @i minutes</td>
+                    <td id="@i-total-capacity"> @i minutes</td>
+                </tr>
+            }
+        </table>
+    </div>
+
+    <div id="stations-table">
+        <table>
+            <tr>
+                <th>Station</th>
+                <th>Capacity</th>
+            </tr>
+            @for(station <- stations) {
+                <tr>
+                    <td>@station</td>
+                    <td id="@station-capacity">0</td>
+                </tr>
+            }
+        </table>
+    </div>
+
+    <script type="text/javascript">
+            var url = "@routes.Application.stream().webSocketURL()";
+            var streamSocket = new WebSocket(url);
+
+            streamSocket.onmessage = function (event) {
+                var data = JSON.parse(event.data);
+                var metroCars = data.metroCars;
+
+                for (var metroCarId in metroCars) {
+                    var metroCar = metroCars[metroCarId];
+                    document.getElementById(metroCarId + "-departure-station").innerHTML = metroCar.departureStation;
+                    document.getElementById(metroCarId + "-time-since-departure").innerHTML = metroCar.minutesFromDeparture;
+                    document.getElementById(metroCarId + "-current-capacity").innerHTML = 0;
+                    document.getElementById(metroCarId + "-total-capacity").innerHTML = metroCar.capacity;
+                }
+
+                var metroCarsCapacities = data.metroCarsCapacities;
+
+                for (var metroCarId in metroCarsCapacities) {
+                    document.getElementById(metroCarId + "-current-capacity").innerHTML = metroCarsCapacities[metroCarId];
+                }
+
+                var stationsCapacities = data.stationCapacities;
+                for(var station in data.stationCapacities) {
+                    document.getElementById(station + "-capacity").innerHTML = stationsCapacities[station]
+                }
+            };
+
+    </script>
 
 }
