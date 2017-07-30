@@ -1,13 +1,14 @@
 package actors
 
 import java.io.File
-import java.text.SimpleDateFormat
-import java.util.{Calendar, Date}
+import java.time.{Duration, LocalTime}
+import java.time.format.DateTimeFormatter
+import java.time.temporal.ChronoUnit
 
 import akka.actor._
 import messages._
 import models._
-import play.api.libs.json.{JsValue, Json}
+import play.api.libs.json.{JsValue, Json, Writes}
 
 import scala.concurrent.duration._
 
@@ -54,18 +55,25 @@ class StatusUpdater(stationStatusActor: ActorRef, out: ActorRef) extends Actor w
 
   def updateMetroCarLocations(): Unit = {
 
-    val time = currentTime()
+    val now = LocalTime.now().truncatedTo(ChronoUnit.MINUTES) //0401
 
     schedules
-      .filter {
-        _.departureTime == time
+      .filter { schedule =>
+        val scheduleTime = LocalTime
+          .parse(schedule.departureTime, DateTimeFormatter.ofPattern("HHmm")) //0400
+        val lowerBoundTime = now.minusMinutes(4) //0357
+
+        (scheduleTime.isBefore(now) || scheduleTime.equals(now)) && scheduleTime.isAfter(lowerBoundTime)
       }
       .foreach { schedule =>
 
         val capacity = if (schedule.trainId <= 12) 1800 else 900
 
+        val scheduleTime = LocalTime.parse(schedule.departureTime, DateTimeFormatter.ofPattern("HHmm"))
+        val minutes = Duration.between(scheduleTime, now).toMinutes
+
         metroCars = metroCars.updated(schedule.trainId,
-          MetroCar(schedule.trainId, schedule.departureStation, capacity))
+          MetroCar(schedule.trainId, schedule.departureStation, minutes, capacity))
       }
     log.info("Metro Car Locations Updated")
   }
@@ -73,18 +81,26 @@ class StatusUpdater(stationStatusActor: ActorRef, out: ActorRef) extends Actor w
   def updateCapacities(stationsStatus: Map[String, List[Passenger]]): Unit = {
     metroCarsCapacities = metroCarsCapacities.map { case (metroCarId, currentMetroPassengers) =>
       val metroCar = metroCars(metroCarId)
-      val stationPassengers = stationsStatus(metroCar.currentStation)
-      val passengersTaken = stationPassengers.take(metroCar.capacity - currentMetroPassengers.size)
+      val stationPassengers = stationsStatus(metroCar.departureStation)
 
-      passengersThatBoarded = passengersThatBoarded.updated(metroCar.currentStation, passengersTaken.size)
+      val passengersTaken = if (metroCar.minutesFromDeparture == 0)
+        stationPassengers.take(metroCar.capacity - currentMetroPassengers.size)
+      else List.empty
+
+      passengersThatBoarded = passengersThatBoarded.updated(metroCar.departureStation, passengersTaken.size)
 
       (metroCarId, currentMetroPassengers ::: passengersTaken)
     }
 
     metroCarsCapacities = metroCarsCapacities.map { case (metroCarId, passengers) =>
       val metroCar = metroCars(metroCarId)
-      val currentStation = metroCar.currentStation
-      (metroCarId, passengers.filter(_.destination != currentStation))
+      val currentStation = metroCar.departureStation
+
+      val passengersOut = if (metroCar.minutesFromDeparture == 0)
+        passengers.filter(_.destination != currentStation)
+      else passengers
+
+      (metroCarId, passengersOut)
     }
     log.info("Metro Car Capacities updated {}", metroCarsCapacities.mapValues(_.size))
     log.info("Passengers that boarded {}", passengersThatBoarded)
@@ -92,10 +108,10 @@ class StatusUpdater(stationStatusActor: ActorRef, out: ActorRef) extends Actor w
 
   def makeJsonResponse(stationCapacities: Map[String, Int]): JsValue = {
     val metroCarLocations = metroCars.map { case (id, metroCar) =>
-      (id.toString, metroCar.currentStation)
+      (id.toString, metroCar)
     }
 
-    val metroCarCapacities = metroCarsCapacities.map { case(metroCarId, passengers) =>
+    val metroCarCapacities = metroCarsCapacities.map { case (metroCarId, passengers) =>
       (metroCarId.toString, passengers.size)
     }
 
@@ -108,7 +124,7 @@ class StatusUpdater(stationStatusActor: ActorRef, out: ActorRef) extends Actor w
 
   def loadSchedules(): Unit = {
     val file = new File("schedules.csv")
-    val time = currentTime()
+    val now = LocalTime.now().truncatedTo(ChronoUnit.MINUTES)
 
     schedules = for (
       line: String <- scala.io.Source.fromFile(file).getLines().toList.drop(1)
@@ -116,43 +132,37 @@ class StatusUpdater(stationStatusActor: ActorRef, out: ActorRef) extends Actor w
 
     metroCars = Map(schedules
       .filter { schedule =>
-        val now: Date = stringToTime(time)
-        val scheduleTime: Date = stringToTime(schedule.departureTime)
-        val upperBoundTime = addMinutesToDate(scheduleTime)
+        val scheduleTime = LocalTime.parse(schedule.departureTime, DateTimeFormatter.ofPattern("HHmm"))
+        val lowerBoundTime = now.minusMinutes(4) //0357
 
-        (scheduleTime.after(now) || scheduleTime==now) &&  scheduleTime.before(upperBoundTime)
+        (scheduleTime.isBefore(now) || scheduleTime.equals(now)) && scheduleTime.isAfter(lowerBoundTime)
       }
       .map { schedule =>
         val capacity = if (schedule.trainId <= 12) 1800 else 900
-        (schedule.trainId, MetroCar(schedule.trainId, schedule.departureStation, capacity))
+
+        val scheduleTime = LocalTime.parse(schedule.departureTime, DateTimeFormatter.ofPattern("HHmm"))
+        val minutes = Duration.between(scheduleTime, now).toMinutes
+
+        (schedule.trainId, MetroCar(schedule.trainId, schedule.departureStation, minutes, capacity))
       }: _*)
 
-    metroCarsCapacities = metroCars.mapValues{ _ => List.empty[Passenger] }
+    metroCarsCapacities = metroCars.mapValues { _ => List.empty[Passenger] }
 
   }
 
-
-  def currentTime(): String = {
-    val now = Calendar.getInstance.getTime
-    val format = new SimpleDateFormat("HHmm")
-    format.format(now)
-  }
-
-  def stringToTime(time: String): Date = {
-    val format = new SimpleDateFormat("HHmm")
-    format.parse(time)
-  }
-
-  def addMinutesToDate(date: Date): Date = {
-    val calendar = Calendar.getInstance
-    calendar.setTime(date)
-    calendar.add(Calendar.MINUTE, 4)
-    calendar.getTime
-  }
 
   def scheduleFromLine(line: String): Schedule = {
     val values = line.split(';')
     Schedule(values(0).toInt, values(1), values(2), values(3))
+  }
+
+  implicit val metroCarWriter = new Writes[MetroCar] {
+    def writes(metroCar: MetroCar) = Json.obj(
+      "id" -> metroCar.id,
+      "departureStation" -> metroCar.departureStation,
+      "minutesFromDeparture" -> metroCar.minutesFromDeparture,
+      "capacity" -> metroCar.capacity
+    )
   }
 
 }

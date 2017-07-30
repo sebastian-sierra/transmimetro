@@ -1,8 +1,9 @@
 package actors
 
 import java.io.File
-import java.text.SimpleDateFormat
-import java.util.Calendar
+import java.time.LocalTime
+import java.time.format.DateTimeFormatter
+import java.time.temporal.ChronoUnit
 
 import akka.actor.{Actor, ActorLogging}
 import messages._
@@ -46,10 +47,10 @@ class StationStatus extends Actor with ActorLogging {
   }
 
   def updateIncomingPassengers(): Unit = {
-    val now = Calendar.getInstance.getTime
-    val format = new SimpleDateFormat("HHmm")
+    val now = LocalTime.now()
+      .truncatedTo(ChronoUnit.MINUTES)
+      .format(DateTimeFormatter.ofPattern("HHmm"))
 
-    val currentTime = format.format(now)
 
     stationsStatus.foreach { case (station, passengers) =>
 
@@ -57,7 +58,7 @@ class StationStatus extends Actor with ActorLogging {
 
       val incomingPassengers = (0 to (50 + Random.nextInt(10))).map { _ =>
         val randomDestinationIndex = Random.nextInt(stationsStatus.size)
-        Passenger(currentTime, destinations(randomDestinationIndex))
+        Passenger(now, destinations(randomDestinationIndex))
       }
 
       stationsStatus = stationsStatus.updated(station, passengers ++: incomingPassengers.toList)
