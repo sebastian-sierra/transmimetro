@@ -19,6 +19,7 @@ class StatusUpdater(stationStatusActor: ActorRef, out: ActorRef) extends Actor w
   var passengersThatBoarded = Map.empty[String, Int]
   var schedules = List.empty[Schedule]
 
+  var passengersOutLogger: ActorRef = _
 
   implicit val executionContext = context.dispatcher
   val tick = context.system.scheduler.schedule(500 millis, 6 seconds, self, Tick)
@@ -26,6 +27,7 @@ class StatusUpdater(stationStatusActor: ActorRef, out: ActorRef) extends Actor w
 
   override def preStart(): Unit = {
     log.info("Starting StationStatus")
+    passengersOutLogger = context.actorOf(Props[PassengersOutLogger])
     //Load schedules from file
     loadSchedules()
     super.preStart()
@@ -86,6 +88,8 @@ class StatusUpdater(stationStatusActor: ActorRef, out: ActorRef) extends Actor w
       val passengersTaken = if (metroCar.minutesFromDeparture == 0)
         stationPassengers.take(metroCar.capacity - currentMetroPassengers.size)
       else List.empty
+
+      if (passengersTaken.nonEmpty) passengersOutLogger ! LogPassengersOut(metroCar.departureStation, passengersTaken)
 
       val previousPassengers = passengersThatBoarded.getOrElse(metroCar.departureStation, 0)
       passengersThatBoarded = passengersThatBoarded

@@ -5,7 +5,7 @@ import java.time.LocalTime
 import java.time.format.DateTimeFormatter
 import java.time.temporal.ChronoUnit
 
-import akka.actor.{Actor, ActorLogging}
+import akka.actor.{Actor, ActorLogging, ActorRef, Props}
 import messages._
 import models.Passenger
 
@@ -16,12 +16,14 @@ import scala.util.Random
 class StationStatus extends Actor with ActorLogging {
 
   var stationsStatus = Map.empty[String, List[Passenger]]
+  var passengersInLogger: ActorRef = _
 
   implicit val executionContext = context.dispatcher
   val tick = context.system.scheduler.schedule(0 millis, 6 seconds, self, Tick)
 
   override def preStart(): Unit = {
     log.info("Starting StationStatus")
+    passengersInLogger = context.actorOf(Props[PassengersInLogger], name = "passengersInLogger")
     loadStations()
   }
 
@@ -59,9 +61,10 @@ class StationStatus extends Actor with ActorLogging {
       val incomingPassengers = (0 to (7+Random.nextInt(4))).map { _ =>
         val randomDestinationIndex = Random.nextInt(stationsStatus.size)
         Passenger(now, destinations(randomDestinationIndex))
-      }
+      }.toList
 
-      stationsStatus = stationsStatus.updated(station, passengers ++: incomingPassengers.toList)
+      passengersInLogger ! LogPassengersIn(station, incomingPassengers)
+      stationsStatus = stationsStatus.updated(station, passengers ++: incomingPassengers)
     }
     log.info("Incoming passengers updated {}", stationsStatus.mapValues{_.size})
   }

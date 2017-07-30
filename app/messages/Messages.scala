@@ -10,4 +10,5 @@ case class StationsStatus(status: Map[String, List[Passenger]])
 case class UpdateBoardedPassengers(status: Map[String, Int])
 case class StationsCapacitiesUpdated(status: Map[String, Int])
 
-case class AddPassengers(passengers: List[(String, String)]) //Time, Destination
+case class LogPassengersIn(station: String, passengers: List[Passenger])
+case class LogPassengersOut(station: String, passengers: List[Passenger])
