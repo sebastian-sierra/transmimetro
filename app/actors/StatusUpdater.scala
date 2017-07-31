@@ -114,12 +114,12 @@ class StatusUpdater(stationStatusActor: ActorRef) extends Actor with ActorLoggin
       val currentStation = metroCar.departureStation
 
       val passengersOut = if (metroCar.minutesFromDeparture <= 0.2)
-        passengers.filter(_.destination != currentStation)
-      else passengers
+        passengers.filter(_.destination == currentStation)
+      else List.empty
 
       if (passengersOut.nonEmpty) passengersOutLogger ! LogPassengersOut(metroCar.departureStation, passengersOut)
 
-      (metroCarId, passengersOut)
+      (metroCarId, passengers.filter(_.destination != currentStation))
     }
     log.info("Metro Car Capacities updated {}", metroCarsCapacities.mapValues(_.size))
     log.info("Passengers that boarded {}", passengersThatBoarded)
