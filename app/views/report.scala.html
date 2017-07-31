@@ -1,0 +1,39 @@
+@import java.time.LocalTime
+
+@(stationData: (Map[LocalTime, Int], Map[LocalTime, Int]))(implicit request: RequestHeader)
+
+@main() {
+    <div class="row">
+
+        <div class="col-md-4">
+            <table class="table table-bordered">
+                <tr>
+                    <th>Time</th>
+                    <th># of arrived passengers</th>
+                </tr>
+                @stationData._1.map { case (time, nPassengers) =>
+                    <tr>
+                        <td>@time</td>
+                        <td>@nPassengers</td>
+                    </tr>
+                }
+            </table>
+        </div>
+
+        <div class="col-md-4">
+            <table class="table table-bordered">
+                <tr>
+                    <th>Time</th>
+                    <th>Arrived Passengers - Leaved Passengers</th>
+                </tr>
+                @stationData._2.map { case (time, nPassengers) =>
+                <tr>
+                    <td>@time</td>
+                    <td>@nPassengers</td>
+                </tr>
+                }
+            </table>
+        </div>
+
+    </div>
+}
