@@ -25,6 +25,7 @@
                 <tr>
                     <th>Metro Car ID</th>
                     <th>Departure Station</th>
+                    <th>Destination</th>
                     <th>Minutes since departure</th>
                     <th>Current capacity</th>
                     <th>Total capacity</th>
@@ -33,6 +34,7 @@
                     <tr>
                         <td>@i</td>
                         <td id="@i-departure-station"> @i station</td>
+                        <td id="@i-destination"> @i station</td>
                         <td id="@i-time-since-departure"> @i minutes</td>
                         <td id="@i-current-capacity"> @i minutes</td>
                         <td id="@i-total-capacity"> @i minutes</td>
@@ -69,6 +71,7 @@
                 for (var metroCarId in metroCars) {
                     var metroCar = metroCars[metroCarId];
                     document.getElementById(metroCarId + "-departure-station").innerHTML = metroCar.departureStation;
+                    document.getElementById(metroCarId + "-destination").innerHTML = metroCar.destination;
                     document.getElementById(metroCarId + "-time-since-departure").innerHTML = metroCar.minutesFromDeparture;
                     document.getElementById(metroCarId + "-current-capacity").innerHTML = 0;
                     document.getElementById(metroCarId + "-total-capacity").innerHTML = metroCar.capacity;

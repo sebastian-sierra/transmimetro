@@ -19,7 +19,7 @@ class StationStatus extends Actor with ActorLogging {
   var passengersInLogger: ActorRef = _
 
   implicit val executionContext = context.dispatcher
-  val tick = context.system.scheduler.schedule(0 millis, 6 seconds, self, Tick)
+  val tick = context.system.scheduler.schedule(0 millis, 5 seconds, self, Tick)
 
   override def preStart(): Unit = {
     log.info("Starting StationStatus")
@@ -36,7 +36,7 @@ class StationStatus extends Actor with ActorLogging {
 
     case FetchStationStatus =>
       log.info("Fetch received")
-      sender() ! StationsStatus(stationsStatus)
+      sender() ! StationsStatusUpdated(stationsStatus)
 
     case UpdateBoardedPassengers(boardedPassengers) =>
       boardedPassengers.foreach { case (station, nPassengers) =>
@@ -53,12 +53,11 @@ class StationStatus extends Actor with ActorLogging {
       .truncatedTo(ChronoUnit.MINUTES)
       .format(DateTimeFormatter.ofPattern("HHmm"))
 
-
     stationsStatus.foreach { case (station, passengers) =>
 
       val destinations = stationsStatus.keys.toArray
 
-      val incomingPassengers = (0 to (7+Random.nextInt(4))).map { _ =>
+      val incomingPassengers = (0 to Random.nextInt(3)).map { _ =>
         val randomDestinationIndex = Random.nextInt(stationsStatus.size)
         Passenger(now, destinations(randomDestinationIndex))
       }.toList

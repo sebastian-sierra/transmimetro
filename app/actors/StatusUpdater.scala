@@ -12,7 +12,7 @@ import play.api.libs.json.{JsValue, Json, Writes}
 
 import scala.concurrent.duration._
 
-class StatusUpdater(stationStatusActor: ActorRef, out: ActorRef) extends Actor with ActorLogging {
+class StatusUpdater(stationStatusActor: ActorRef) extends Actor with ActorLogging {
 
   var metroCars = Map.empty[Int, MetroCar]
   var metroCarsCapacities = Map.empty[Int, List[Passenger]]
@@ -22,11 +22,11 @@ class StatusUpdater(stationStatusActor: ActorRef, out: ActorRef) extends Actor w
   var passengersOutLogger: ActorRef = _
 
   implicit val executionContext = context.dispatcher
-  val tick = context.system.scheduler.schedule(500 millis, 6 seconds, self, Tick)
-
+  val tick = context.system.scheduler.schedule(0 millis, 3 seconds, self, Tick)
+  var subscribers: List[ActorRef] = List.empty
 
   override def preStart(): Unit = {
-    log.info("Starting StationStatus")
+    log.info("Starting StatusUpdater")
     passengersOutLogger = context.actorOf(Props[PassengersOutLogger])
     //Load schedules from file
     loadSchedules()
@@ -42,7 +42,15 @@ class StatusUpdater(stationStatusActor: ActorRef, out: ActorRef) extends Actor w
       log.info("Fetching station status")
       stationStatusActor ! FetchStationStatus
 
-    case StationsStatus(status) =>
+    case Subscribe(out) =>
+      subscribers = out::subscribers
+      log.info("Client arrived, total: {}", subscribers.size)
+
+    case Unsubscribe(out) =>
+      subscribers = subscribers.filter{_ != out}
+      log.info("Client left, total: {}", subscribers.size)
+
+    case StationsStatusUpdated(status) =>
       log.info("Updated station status received {}", status.mapValues(_.size))
       updateCapacities(status)
       stationStatusActor ! UpdateBoardedPassengers(passengersThatBoarded)
@@ -50,20 +58,21 @@ class StatusUpdater(stationStatusActor: ActorRef, out: ActorRef) extends Actor w
 
     case StationsCapacitiesUpdated(stationCapacities) =>
       log.info("Updated station capacities received")
-      out ! makeJsonResponse(stationCapacities)
-      log.info("Json sent to client")
-
+      subscribers.foreach{ out=>
+        out ! makeJsonResponse(stationCapacities)
+        log.info("Json sent to client")
+      }
   }
 
   def updateMetroCarLocations(): Unit = {
 
-    val now = LocalTime.now().truncatedTo(ChronoUnit.MINUTES) //0401
+    val now = LocalTime.now().truncatedTo(ChronoUnit.SECONDS) //0401
 
     schedules
       .filter { schedule =>
         val scheduleTime = LocalTime
           .parse(schedule.departureTime, DateTimeFormatter.ofPattern("HHmm")) //0400
-        val lowerBoundTime = now.minusMinutes(4) //0357
+      val lowerBoundTime = now.minusMinutes(4) //0357
 
         (scheduleTime.isBefore(now) || scheduleTime.equals(now)) && scheduleTime.isAfter(lowerBoundTime)
       }
@@ -72,10 +81,10 @@ class StatusUpdater(stationStatusActor: ActorRef, out: ActorRef) extends Actor w
         val capacity = if (schedule.trainId <= 12) 1800 else 900
 
         val scheduleTime = LocalTime.parse(schedule.departureTime, DateTimeFormatter.ofPattern("HHmm"))
-        val minutes = Duration.between(scheduleTime, now).toMinutes
+        val minutes = Duration.between(scheduleTime, now).getSeconds / 60.0
 
         metroCars = metroCars.updated(schedule.trainId,
-          MetroCar(schedule.trainId, schedule.departureStation, minutes, capacity))
+          MetroCar(schedule.trainId, schedule.departureStation, schedule.destination, minutes, capacity))
       }
     log.info("Metro Car Locations Updated")
   }
@@ -85,15 +94,17 @@ class StatusUpdater(stationStatusActor: ActorRef, out: ActorRef) extends Actor w
       val metroCar = metroCars(metroCarId)
       val stationPassengers = stationsStatus(metroCar.departureStation)
 
-      val passengersTaken = if (metroCar.minutesFromDeparture == 0)
-        stationPassengers.take(metroCar.capacity - currentMetroPassengers.size)
+      val passengersTaken = if (metroCar.minutesFromDeparture <= 0.2)
+        stationPassengers
+          .filter{ p =>
+            DestinationChecker.isGoodForPassenger(metroCar.departureStation, metroCar.destination, p.destination)
+          }
+          .take(metroCar.capacity - currentMetroPassengers.size)
       else List.empty
-
-      if (passengersTaken.nonEmpty) passengersOutLogger ! LogPassengersOut(metroCar.departureStation, passengersTaken)
 
       val previousPassengers = passengersThatBoarded.getOrElse(metroCar.departureStation, 0)
       passengersThatBoarded = passengersThatBoarded
-        .updated(metroCar.departureStation, previousPassengers+passengersTaken.size)
+        .updated(metroCar.departureStation, previousPassengers + passengersTaken.size)
 
       (metroCarId, currentMetroPassengers ::: passengersTaken)
     }
@@ -102,9 +113,11 @@ class StatusUpdater(stationStatusActor: ActorRef, out: ActorRef) extends Actor w
       val metroCar = metroCars(metroCarId)
       val currentStation = metroCar.departureStation
 
-      val passengersOut = if (metroCar.minutesFromDeparture == 0)
+      val passengersOut = if (metroCar.minutesFromDeparture <= 0.2)
         passengers.filter(_.destination != currentStation)
       else passengers
+
+      if (passengersOut.nonEmpty) passengersOutLogger ! LogPassengersOut(metroCar.departureStation, passengersOut)
 
       (metroCarId, passengersOut)
     }
@@ -147,9 +160,9 @@ class StatusUpdater(stationStatusActor: ActorRef, out: ActorRef) extends Actor w
         val capacity = if (schedule.trainId <= 12) 1800 else 900
 
         val scheduleTime = LocalTime.parse(schedule.departureTime, DateTimeFormatter.ofPattern("HHmm"))
-        val minutes = Duration.between(scheduleTime, now).toMinutes
+        val minutes = Duration.between(scheduleTime, now).getSeconds / 60.0
 
-        (schedule.trainId, MetroCar(schedule.trainId, schedule.departureStation, minutes, capacity))
+        (schedule.trainId, MetroCar(schedule.trainId, schedule.departureStation, schedule.destination, minutes, capacity))
       }: _*)
 
     metroCarsCapacities = metroCars.mapValues { _ => List.empty[Passenger] }
@@ -166,6 +179,7 @@ class StatusUpdater(stationStatusActor: ActorRef, out: ActorRef) extends Actor w
     def writes(metroCar: MetroCar) = Json.obj(
       "id" -> metroCar.id,
       "departureStation" -> metroCar.departureStation,
+      "destination" -> metroCar.destination,
       "minutesFromDeparture" -> metroCar.minutesFromDeparture,
       "capacity" -> metroCar.capacity
     )
@@ -174,5 +188,5 @@ class StatusUpdater(stationStatusActor: ActorRef, out: ActorRef) extends Actor w
 }
 
 object StatusUpdater {
-  def props(stationStatus: ActorRef, out: ActorRef) = Props(classOf[StatusUpdater], stationStatus, out)
+  def props(stationStatus: ActorRef) = Props(classOf[StatusUpdater], stationStatus)
 }
